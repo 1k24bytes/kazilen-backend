@@ -29,7 +29,6 @@ from django.db import connections
 from django.db.utils import OperationalError
 
 
-
 load_dotenv()
 
 api = Router()
@@ -49,11 +48,30 @@ def getAllWorker(request):
     return Worker.objects.all()
 
 
-@api.get("/filterworker", response=List[WorkerSchema])
+@api.get("/filterworker", response=List[dict])
 def getFilterWorker(request, category: str):
     tempWor = Worker.objects.all()
-    filterWorker = tempWor.filter(**{f"sub_categories__{category}__visible": True})
-    return filterWorker
+    filterWorker = tempWor.filter(
+        **{f"sub_categories__{category}__visible": True})
+    result = []
+    for worker in filterWorker:
+        sub_data = worker.sub_categories.get(category, {})
+
+        worker_dict = {
+            "id": str(worker.id),
+            "name": worker.name,
+            "address": worker.address,
+            "phoneNo": str(worker.phoneNo),
+            "rating": worker.rating,
+            "description": worker.description,
+            "sub_categories": {
+                "price": sub_data.get("price", 120),
+                "details": sub_data.get("details", "")
+            }
+        }
+        result.append(worker_dict)
+
+    return result
 
 
 @api.post("/send-otp")
@@ -85,9 +103,9 @@ def verify_otp(request, payload: VerifyOTPSchema):
     return {"success": True, "session_token": session_token}
 
 
-
 class phonePayload(Schema):
     phone: str
+
 
 @api.post("/check", response={200: dict, 404: dict})
 def unprotected_check(request, data: phonePayload):
@@ -98,13 +116,16 @@ def unprotected_check(request, data: phonePayload):
     else:
         return 404, {"messg": "yo no bud"}
 
+
 class userIdGETTT(Schema):
-    userId: uuid.UUID 
+    userId: uuid.UUID
+
 
 @api.post("/get-profile", auth=CustomAuth(), response=CustomerSchema)
-def get_profile(request, payload : userIdGETTT):
+def get_profile(request, payload: userIdGETTT):
     details = get_object_or_404(Customer, id=payload.userId)
     return details
+
 
 @api.get("/get-history", auth=CustomAuth(), response=List[HistorySchema])
 def get_history(request):
@@ -135,18 +156,22 @@ def requestBooking(request, payload: booking):
 
 class userID(Schema):
     userId: str
+
+
 @api.post("/get-book-status")
 def getStatusBook(request, payload: userID):
     customer = get_object_or_404(Customer, id=payload.userId)
     action = get_object_or_404(History, id=customer.work_id)
     return {
-            "name": action.worker.name,
-            "price": action.price,
-            "location": action.geo_location,
-            }
+        "name": action.worker.name,
+        "price": action.price,
+        "location": action.geo_location,
+    }
+
 
 class poll_this(Schema):
     userId: str
+
 
 @api.post("/poll", auth=CustomAuth())
 def pollThis(request, payload: poll_this):
@@ -162,7 +187,6 @@ def helchek(request):
     return {"status": "RUNNING"}
 
 
-
 @api.get("/db_health")
 def db_check(request):
     db_conn = connections["default"]  # will change once we migrate to neon
@@ -173,6 +197,3 @@ def db_check(request):
     except OperationalError as e:
         print(f"DB ERROR: {e}")  # testing purposes only
         return {"status": "DB is down"}
-
-
-

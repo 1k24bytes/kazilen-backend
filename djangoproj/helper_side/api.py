@@ -81,7 +81,6 @@ def unprotected_check(request, data: phonePayload):
 
 class getPro(Schema):
     userId: UUID
-    userID: UUID
 
 
 @api.post("/get-profile", auth=CustomAuth(), response=WorkerSchema)

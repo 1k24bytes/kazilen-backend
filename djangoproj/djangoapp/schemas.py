@@ -33,7 +33,7 @@ class CustomerSchema(Schema):
 class WorkerSchema(ModelSchema):
     #    subcategory: List[str]
     phoneNo: str
-    imageURL: str
+    imageURL: Optional[str]
 
     class Meta:
         model = Worker
