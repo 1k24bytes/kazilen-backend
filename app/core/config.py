@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     SMS_GATEWAY_URL: str = os.getenv("SMS_GATEWAY_URL", "")
     SMS_GATEWAY_API_KEY: str = os.getenv("SMS_GATEWAY_API_KEY", "")
 
+    # =========================================================================
+    # ADMIN PANEL AUTHENTICATION (bcrypt + JWT, env-driven single admin)
+    # =========================================================================
+    ADMIN_EMAIL: str = os.getenv("ADMIN_EMAIL", "admin@kazilen.com")
+    # Plain fallback password (dev convenience only).
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "")
+    # bcrypt hash of the admin password — PRIMARY secure credential.
+    # Generate with: python -c "import bcrypt; print(bcrypt.hashpw(b'<pw>', bcrypt.gensalt()).decode())"
+    ADMIN_PASSWORD_HASH: str = os.getenv("ADMIN_PASSWORD_HASH", "")
+
     class Config:
         env_file = ".env"
         extra = "ignore"

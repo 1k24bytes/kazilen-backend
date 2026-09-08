@@ -5,7 +5,7 @@ from sqlalchemy import text
 import traceback
 import asyncio
 
-from app.api.routes import auth, users, workers, bookings, reviews, addresses
+from app.api.routes import auth, users, workers, bookings, reviews, addresses, admin
 from app.db.database import engine, Base, SessionLocal
 from app.core.config import settings
 from app.services.referral_service import ensure_referral_codes
@@ -63,8 +63,12 @@ app = FastAPI(
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:4000",
+    "http://localhost:5173",
+    "http://localhost:5174",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:4000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
 ]
 
 app.add_middleware(
@@ -87,6 +91,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Include Router Modules
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Admin Panel"])
 app.include_router(users.router, prefix="/api/users", tags=["Users Profile"])
 app.include_router(workers.router, prefix="/api/workers", tags=["Worker Marketplace"])
 app.include_router(bookings.router, prefix="/api/bookings", tags=["Bookings"])

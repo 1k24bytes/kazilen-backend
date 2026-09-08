@@ -6,6 +6,7 @@ twilio
 redis
 pyjwt
 passlib
+bcrypt
 python-dotenv
 pydantic
 pydantic-settings
