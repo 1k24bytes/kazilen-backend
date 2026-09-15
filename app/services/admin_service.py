@@ -56,6 +56,7 @@ class AdminService:
     @staticmethod
     def get_stats(db: Session) -> dict:
         """Aggregate platform-wide counts for the admin dashboard."""
+        from app.db.models import Category, MembershipPlan, PlatformFeedback, ReferralClaim, SubCategory
         return {
             "total_users": db.query(User).count(),
             "total_customers": db.query(User).filter(User.role == "customer").count(),
@@ -71,6 +72,11 @@ class AdminService:
             .filter(Booking.status == "completed")
             .count(),
             "total_reviews": db.query(BookingReview).count(),
+            "total_feedback": db.query(PlatformFeedback).count(),
+            "total_categories": db.query(Category).count(),
+            "total_sub_categories": db.query(SubCategory).count(),
+            "total_referrals": db.query(ReferralClaim).count(),
+            "total_membership_plans": db.query(MembershipPlan).count(),
         }
 
     @staticmethod

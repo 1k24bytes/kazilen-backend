@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     REDIS_URL: str = get_redis_url()
     DATABASE_URL: str = get_database_url()
 
+    # Membership / quota enforcement: free bookings per worker before a
+    # subscription is required. Override with FREE_BOOKINGS env var.
+    FREE_BOOKINGS: int = int(os.getenv("FREE_BOOKINGS", "2"))
+
     # =========================================================================
     # OTP DELIVERY PROVIDER CONFIGURATION
     # Options: "console" (Dev), "whatsapp" (Meta), "twilio" (SMS), "custom" (HTTP API)

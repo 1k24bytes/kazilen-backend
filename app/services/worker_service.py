@@ -1,15 +1,46 @@
 import json
+from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from app.db.models import User, BookingReview, Address
+from app.db.models import MembershipPlan, User, BookingReview, Address
+
+
+def _time_left_label(expires_at) -> str:
+    try:
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at)
+        exp = expires_at.replace(tzinfo=timezone.utc) if expires_at.tzinfo is None else expires_at.astimezone(timezone.utc)
+        delta = exp - datetime.now(timezone.utc)
+        days = max(0, delta.days)
+        if days == 0:
+            hours = max(0, int(delta.total_seconds() // 3600))
+            return f"{hours}h left" if hours else "Expires today"
+        return f"{days} day{'s' if days != 1 else ''} left"
+    except Exception:
+        return "Active"
+
+
+def _plan_price(db: Session, plan_id) -> str:
+    if not plan_id:
+        return ""
+    plan = db.query(MembershipPlan).filter(MembershipPlan.id == plan_id).first()
+    return str(plan.price) if plan else ""
+
+
+def _plan_days(db: Session, plan_id) -> int | None:
+    if not plan_id:
+        return None
+    plan = db.query(MembershipPlan).filter(MembershipPlan.id == plan_id).first()
+    return plan.duration_days if plan else None
 
 class WorkerService:
     @staticmethod
     def get_available_workers(
         service_id: Optional[str] = None,
         sub_category: Optional[str] = None,
-        db: Session = None
+        db: Session = None,
+        hide_exhausted: bool = False,
     ) -> dict:
         target_service = service_id or sub_category
         workers = (
@@ -46,6 +77,13 @@ class WorkerService:
                 enabled = target_service in extracted_ids
 
             if enabled:
+                if hide_exhausted and db is not None:
+                    try:
+                        from app.services.membership_service import MembershipService
+                        if MembershipService.worker_quota(w.id, db)["quota_exhausted"]:
+                            continue
+                    except Exception:
+                        pass
                 # Calculate real rating and review count from BookingReview table
                 reviews = db.query(BookingReview).filter(BookingReview.reviewee_id == w.id).all() if db else []
                 if reviews:
@@ -140,6 +178,41 @@ class WorkerService:
             except Exception:
                 pass
 
+        from app.services.membership_service import MembershipService
+        quota = MembershipService.worker_quota(current_user.id, db)
+        sub = quota.get("subscription") or {}
+        if quota.get("subscribed"):
+            plan_completed = quota.get("plan_used", 0)
+            plan_limit = quota.get("plan_limit")
+            plan_name = quota.get("plan_name") or "Plan"
+            expires_at = sub.get("expires_at")
+            time_left = _time_left_label(expires_at) if expires_at else "Active"
+            plan_block = {
+                "completed": plan_completed,
+                "totalLabel": str(plan_limit) if plan_limit is not None else "∞",
+                "price": str(sub.get("plan_name") and _plan_price(db, sub.get("plan_id")) or ""),
+                "name": plan_name,
+                "timeLeft": time_left,
+            }
+            recharge_block = {
+                "price": str(_plan_price(db, sub.get("plan_id")) or ""),
+                "validityDays": _plan_days(db, sub.get("plan_id")) or 30,
+                "orderType": plan_name,
+            }
+        else:
+            plan_block = {
+                "completed": quota.get("free_used", 0),
+                "totalLabel": str(quota.get("free_limit", 2)),
+                "price": "Free trial",
+                "name": "Free trial",
+                "timeLeft": f"{quota.get('free_remaining', 0)} free left",
+            }
+            recharge_block = {
+                "price": "",
+                "validityDays": 30,
+                "orderType": "Membership plans",
+            }
+
         return {
             "status": "success",
             "progress": {
@@ -158,16 +231,8 @@ class WorkerService:
             "reviews_count": reviews_count,
             "recent_reviews": recent_reviews,
             "active_services_count": active_services_count,
-            "plan": {
-                "completed": completed_count,
-                "totalLabel": "10",
-                "price": "399",
-                "timeLeft": "28 Days left"
-            },
-            "recharge": {
-                "price": "399",
-                "validityDays": 30,
-                "orderType": "Instant Local Dispatch"
-            }
+            "membership": quota,
+            "plan": plan_block,
+            "recharge": recharge_block,
         }
 

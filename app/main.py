@@ -5,7 +5,7 @@ from sqlalchemy import text
 import traceback
 import asyncio
 
-from app.api.routes import auth, users, workers, bookings, reviews, addresses, admin
+from app.api.routes import auth, users, workers, bookings, reviews, addresses, admin, catalog, membership
 from app.db.database import engine, Base, SessionLocal
 from app.core.config import settings
 from app.services.referral_service import ensure_referral_codes
@@ -29,6 +29,10 @@ def auto_migrate():
             pass
         try:
             conn.execute(text("ALTER TABLE users ADD COLUMN is_online INTEGER DEFAULT 1"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN referral_earnings INTEGER DEFAULT 0"))
         except Exception:
             pass
         try:
@@ -92,6 +96,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Include Router Modules
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin Panel"])
+app.include_router(catalog.router, prefix="/api", tags=["Catalog"])
+app.include_router(membership.router, prefix="/api/membership", tags=["Membership"])
 app.include_router(users.router, prefix="/api/users", tags=["Users Profile"])
 app.include_router(workers.router, prefix="/api/workers", tags=["Worker Marketplace"])
 app.include_router(bookings.router, prefix="/api/bookings", tags=["Bookings"])

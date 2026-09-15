@@ -89,6 +89,9 @@ def create_booking(booking_data, customer_id: int) -> Booking:
             detail="This specialist is currently offline and unavailable for booking.",
         )
 
+    from app.services.membership_service import MembershipService
+    MembershipService.check_booking_allowed(worker.id, db)
+
     avail = _get_worker_availability(worker)
     days_off = avail.get("days_off", [])
     dead_slots = avail.get("dead_slots", [])
@@ -330,6 +333,26 @@ def accept_booking(booking_id: int, worker_id: int) -> dict:
         raise HTTPException(status_code=403, detail="This booking is not assigned to you")
     if booking.status != "pending":
         raise HTTPException(status_code=400, detail=f"Booking is already {booking.status}")
+    from app.services.membership_service import MembershipService
+    quota = MembershipService.worker_quota(worker_id, db)
+    if quota["subscribed"]:
+        limit = quota["plan_limit"]
+        used = quota["plan_used"]
+    else:
+        limit = quota["free_limit"]
+        used = quota["total_used"]
+    if limit is not None and used >= limit:
+        if quota["subscribed"]:
+            detail = (
+                f"Booking limit reached ({used}/{limit} on {quota['plan_name']}). "
+                "Renew the subscription to accept more jobs."
+            )
+        else:
+            detail = (
+                f"Free bookings used ({used}/{quota['free_limit']}). "
+                "Subscribe to a membership plan to accept more jobs."
+            )
+        raise HTTPException(status_code=402, detail=detail)
     booking.status = "accepted"
     db.commit()
     print(f"[BOOKING] #{booking_id} accepted by worker {worker_id}")

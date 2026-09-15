@@ -15,6 +15,7 @@ class User(Base):
     availability = Column(String, nullable=True)      # JSON string: {"days_off": [...], "dead_slots": [...]}
     referral_code = Column(String(6), unique=True, index=True, nullable=True)
     referral_points = Column(Integer, default=0, nullable=False)
+    referral_earnings = Column(Integer, default=0, nullable=False)
     is_online = Column(Integer, default=1, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -95,4 +96,62 @@ class Address(Base):
     is_default = Column(Integer, default=0)  # 1 for default, 0 otherwise
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+
+class Category(Base):
+    __tablename__ = "categories"
+
+    id = Column(String(100), primary_key=True)  # slug e.g. "Electrician"
+    name = Column(String(255), nullable=False)
+    description = Column(String(1000), nullable=True)
+    image = Column(String(500), nullable=True)
+    is_active = Column(Integer, default=1, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+
+class SubCategory(Base):
+    __tablename__ = "sub_categories"
+
+    id = Column(String(100), primary_key=True)  # slug e.g. "fan-repair"
+    category_id = Column(String(100), ForeignKey("categories.id"), nullable=False, index=True)
+    label = Column(String(255), nullable=False)
+    description = Column(String(2000), nullable=True)
+    image = Column(String(500), nullable=True)
+    tag = Column(String(100), nullable=True)
+    price_type = Column(String(20), default="fixed")  # fixed | hourly
+    fixed_price = Column(Integer, nullable=True)
+    price_per_hour = Column(Integer, nullable=True)
+    is_active = Column(Integer, default=1, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+
+class MembershipPlan(Base):
+    __tablename__ = "membership_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    price = Column(Integer, nullable=False, default=0)
+    duration_days = Column(Integer, nullable=False, default=30)
+    bookings_included = Column(Integer, nullable=True)
+    description = Column(String(2000), nullable=True)
+    features = Column(String(2000), nullable=True)  # JSON list of feature strings
+    is_active = Column(Integer, default=1, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+
+class MembershipSubscription(Base):
+    __tablename__ = "membership_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    worker_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    plan_id = Column(Integer, ForeignKey("membership_plans.id"), nullable=False, index=True)
+    status = Column(String(20), default="active")  # active | expired | cancelled
+    starts_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 

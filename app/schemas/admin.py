@@ -46,3 +46,8 @@ class AdminStats(BaseModel):
     bookings_pending: int
     bookings_completed: int
     total_reviews: int
+    total_feedback: int = 0
+    total_categories: int = 0
+    total_sub_categories: int = 0
+    total_referrals: int = 0
+    total_membership_plans: int = 0
