@@ -5,6 +5,7 @@ class WorkerResponseSchema(BaseModel):
     id: int
     full_name: str
     phone_number: str
+    profile_photo: Optional[str] = None
     rating: Optional[float] = None
     reviews_count: Optional[int] = 0
     locality: str = "Dharampeth, Nagpur"

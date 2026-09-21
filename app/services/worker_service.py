@@ -47,7 +47,9 @@ class WorkerService:
             db.query(User)
             .filter(
                 User.role == "worker",
-                User.is_online != 0
+                User.is_online != 0,
+                # Only admin-approved workers are visible in the marketplace.
+                User.verification_status == "approved",
             )
             .all()
             if db else []
@@ -113,6 +115,7 @@ class WorkerService:
                     "id": w.id,
                     "full_name": w.full_name or "Verified Partner",
                     "phone_number": w.phone_number,
+                    "profile_photo": w.profile_photo,
                     "rating": avg_rating,
                     "reviews_count": reviews_count,
                     "locality": locality_val,
@@ -215,6 +218,8 @@ class WorkerService:
 
         return {
             "status": "success",
+            "verification_status": current_user.verification_status or "approved",
+            "profile_photo": current_user.profile_photo,
             "progress": {
                 "today": {
                     "earnings": total_earnings,

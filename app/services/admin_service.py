@@ -135,6 +135,8 @@ class AdminService:
             referral_code=generate_unique_referral_code(db),
             referral_points=0,
             is_online=1 if is_online else 0,
+            # Admin-created workers are pre-approved (no review needed).
+            verification_status="approved",
         )
         db.add(worker)
         db.commit()

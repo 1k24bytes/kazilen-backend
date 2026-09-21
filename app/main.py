@@ -36,6 +36,14 @@ def auto_migrate():
         except Exception:
             pass
         try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN verification_status VARCHAR(20) DEFAULT 'approved'"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN profile_photo VARCHAR(1000)"))
+        except Exception:
+            pass
+        try:
             conn.execute(text("CREATE UNIQUE INDEX ix_users_referral_code ON users (referral_code)"))
         except Exception:
             pass

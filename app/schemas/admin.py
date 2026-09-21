@@ -36,6 +36,8 @@ class AdminWorkerResponse(BaseModel):
     gender: Optional[str] = None
     referral_code: Optional[str] = None
     is_online: int = 1
+    verification_status: str = "approved"
+    profile_photo: Optional[str] = None
 
 class AdminStats(BaseModel):
     total_users: int

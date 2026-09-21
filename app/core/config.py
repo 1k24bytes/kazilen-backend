@@ -64,6 +64,17 @@ class Settings(BaseSettings):
     SMS_GATEWAY_API_KEY: str = os.getenv("SMS_GATEWAY_API_KEY", "")
 
     # =========================================================================
+    # CLOUDFLARE R2 OBJECT STORAGE (worker profile photos, S3-compatible)
+    # Get these from https://dash.cloudflare.com/ → R2 → Manage R2 API Tokens
+    # Public bucket must allow public read (r2.dev domain or custom domain).
+    # =========================================================================
+    R2_ACCOUNT_ID: str = os.getenv("R2_ACCOUNT_ID", "")
+    R2_ACCESS_KEY_ID: str = os.getenv("R2_ACCESS_KEY_ID", "")
+    R2_SECRET_ACCESS_KEY: str = os.getenv("R2_SECRET_ACCESS_KEY", "")
+    R2_PUBLIC_BUCKET_NAME: str = os.getenv("R2_PUBLIC_BUCKET_NAME", "")
+    R2_PUBLIC_URL: str = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
+
+    # =========================================================================
     # ADMIN PANEL AUTHENTICATION (bcrypt + JWT, env-driven single admin)
     # =========================================================================
     ADMIN_EMAIL: str = os.getenv("ADMIN_EMAIL", "admin@kazilen.com")

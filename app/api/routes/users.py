@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.db.models import User
 from app.api.deps import get_current_user
+from app.services.r2_service import R2Service
 from app.schemas.user import (
     UserUpdateSchema,
     WorkerServicesUpdateSchema,
@@ -58,6 +59,22 @@ def update_worker_location(
 ):
     """Updates operational base/live location for current user or worker."""
     return UserService.update_user_location(data, current_user, db)
+
+@router.post("/me/photo")
+def upload_my_photo(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Uploads the worker profile photo to Cloudflare R2 (single `file` field, Dunex pattern)."""
+    if not file or not file.content_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A file is required in the \"file\" multipart field")
+    contents = file.file.read()
+    result = R2Service.upload_public_photo(contents, file.filename or "", file.content_type)
+    current_user.profile_photo = result["url"]
+    db.commit()
+    db.refresh(current_user)
+    return {"status": "success", "url": result["url"], "publicId": result["key"]}
 
 @router.put("/me/online")
 @router.put("/me/status")

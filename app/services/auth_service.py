@@ -126,6 +126,9 @@ class AuthService:
                     detail="Referral code is invalid or expired",
                 )
 
+        # New workers start "pending" (in review by admin) and stay hidden
+        # from the marketplace until approved. Customers are always "approved".
+        verification = "pending" if request.role == "worker" else "approved"
         new_user = User(
             phone_number=request.phone_number,
             full_name=request.full_name,
@@ -135,6 +138,7 @@ class AuthService:
             referral_code=generate_unique_referral_code(db),
             referral_points=0,
             is_online=1,
+            verification_status=verification,
         )
         db.add(new_user)
         db.flush()
@@ -149,10 +153,11 @@ class AuthService:
 
         db.commit()
         db.refresh(new_user)
-        
+
         access_token = create_access_token(subject=new_user.id)
         return {
             "status": "success",
             "access_token": access_token,
-            "token_type": "bearer"
+            "token_type": "bearer",
+            "verification_status": new_user.verification_status or "approved",
         }

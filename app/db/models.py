@@ -17,6 +17,11 @@ class User(Base):
     referral_points = Column(Integer, default=0, nullable=False)
     referral_earnings = Column(Integer, default=0, nullable=False)
     is_online = Column(Integer, default=1, nullable=False)
+    # Worker approval flow: "pending" (in review) | "approved" | "rejected".
+    # Customers are always "approved". Defaults to "approved" so existing rows stay live.
+    verification_status = Column(String(20), default="approved", nullable=False)
+    # Public R2 URL of the worker profile photo (nullable until uploaded).
+    profile_photo = Column(String(1000), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

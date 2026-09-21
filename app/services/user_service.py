@@ -66,6 +66,8 @@ class UserService:
             "referral_code": user.referral_code,
             "referral_points": user.referral_points or 0,
             "is_online": bool(user.is_online != 0 if user.is_online is not None else True),
+            "verification_status": user.verification_status or "approved",
+            "profile_photo": user.profile_photo,
             "created_at": str(user.created_at) if user.created_at else None
         }
 

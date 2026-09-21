@@ -81,6 +81,8 @@ def admin_create_worker(
         gender=worker.gender,
         referral_code=worker.referral_code,
         is_online=worker.is_online,
+        verification_status=worker.verification_status or "approved",
+        profile_photo=worker.profile_photo,
     )
 
 
@@ -108,6 +110,8 @@ def admin_list_users(
                 "full_name": u.full_name,
                 "role": u.role,
                 "is_online": u.is_online,
+                "verification_status": u.verification_status or "approved",
+                "profile_photo": u.profile_photo,
                 "referral_code": u.referral_code,
                 "referral_points": u.referral_points,
                 "created_at": str(u.created_at) if u.created_at else None,
@@ -160,6 +164,8 @@ def admin_get_user(
             "dob": user.dob,
             "gender": user.gender,
             "is_online": user.is_online,
+            "verification_status": user.verification_status or "approved",
+            "profile_photo": user.profile_photo,
             "referral_code": user.referral_code,
             "referral_points": user.referral_points,
             "created_at": str(user.created_at) if user.created_at else None,
@@ -190,6 +196,8 @@ def admin_update_user(
         user.is_online = 1 if payload["is_online"] else 0
     if "role" in payload and payload["role"] in ("customer", "worker"):
         user.role = payload["role"]
+    if "verification_status" in payload and payload["verification_status"] in ("pending", "approved", "rejected"):
+        user.verification_status = payload["verification_status"]
     db.commit()
     db.refresh(user)
     return {
@@ -200,8 +208,43 @@ def admin_update_user(
             "full_name": user.full_name,
             "role": user.role,
             "is_online": user.is_online,
+            "verification_status": user.verification_status or "approved",
+            "profile_photo": user.profile_photo,
             "referral_code": user.referral_code,
             "referral_points": user.referral_points,
+        },
+    }
+
+
+@router.put("/users/{user_id}/verification")
+def admin_verify_user(
+    user_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
+):
+    """Approves or rejects a worker (`action`: approve | reject). Approved workers go live in the marketplace."""
+    from fastapi import HTTPException
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    action = (payload.get("action") or "").strip().lower()
+    if action == "approve":
+        user.verification_status = "approved"
+    elif action == "reject":
+        user.verification_status = "rejected"
+    else:
+        raise HTTPException(status_code=400, detail="action must be approve or reject")
+    db.commit()
+    db.refresh(user)
+    return {
+        "status": "success",
+        "user": {
+            "id": user.id,
+            "full_name": user.full_name,
+            "role": user.role,
+            "verification_status": user.verification_status,
+            "profile_photo": user.profile_photo,
         },
     }
 

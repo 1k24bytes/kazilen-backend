@@ -44,4 +44,6 @@ class UserResponseSchema(BaseModel):
     referral_code: Optional[str] = None
     referral_points: int = 0
     is_online: bool = True
+    verification_status: str = "approved"
+    profile_photo: Optional[str] = None
     created_at: Optional[Union[datetime, str]] = None
