@@ -162,6 +162,8 @@ def create_booking(booking_data, customer_id: int) -> Booking:
     booking.worker_name = worker.full_name or "Verified Partner"
     customer = db.query(User).filter(User.id == customer_id).first()
     booking.customer_name = customer.full_name if customer else "Customer"
+    booking.customer_phone = None
+    booking.worker_phone = None
     return booking
 
 
@@ -259,12 +261,20 @@ def get_customer_bookings(customer_id: int) -> dict:
     )
     worker_ids = {b.worker_id for b in bookings}
     worker_map = {}
+    worker_phone_map = {}
     if worker_ids:
         workers = db.query(User).filter(User.id.in_(worker_ids)).all()
         worker_map = {w.id: (w.full_name or "Verified Partner") for w in workers}
+        worker_phone_map = {w.id: w.phone_number for w in workers}
 
     for b in bookings:
         b.worker_name = worker_map.get(b.worker_id, "Verified Partner")
+        # Reveal worker contact only after accept (hide in pending to prevent spam)
+        if b.status == "pending":
+            b.worker_phone = None
+        else:
+            b.worker_phone = worker_phone_map.get(b.worker_id)
+        b.customer_phone = None
 
     return {"status": "success", "bookings": bookings}
 
@@ -287,9 +297,11 @@ def get_worker_bookings(worker_id: int) -> dict:
     )
     cust_ids = {b.customer_id for b in bookings}
     cust_map = {}
+    cust_phone_map = {}
     if cust_ids:
         customers = db.query(User).filter(User.id.in_(cust_ids)).all()
         cust_map = {c.id: (c.full_name or "Customer") for c in customers}
+        cust_phone_map = {c.id: c.phone_number for c in customers}
 
     worker = db.query(User).filter(User.id == worker_id).first()
     w_name = worker.full_name if worker else "Verified Partner"
@@ -297,6 +309,12 @@ def get_worker_bookings(worker_id: int) -> dict:
     for b in bookings:
         b.customer_name = cust_map.get(b.customer_id, "Customer")
         b.worker_name = w_name
+        # Reveal customer contact only after accept (hide in pending to prevent spam)
+        if b.status == "pending":
+            b.customer_phone = None
+        else:
+            b.customer_phone = cust_phone_map.get(b.customer_id)
+        b.worker_phone = None
 
     return {"status": "success", "bookings": bookings}
 
@@ -317,6 +335,20 @@ def get_booking_detail(booking_id: int, user_id: int) -> Booking:
     customer = db.query(User).filter(User.id == booking.customer_id).first()
     booking.worker_name = worker.full_name if worker else "Verified Partner"
     booking.customer_name = customer.full_name if customer else "Customer"
+    # Directional contact reveal (hidden while pending to prevent spam):
+    # worker sees customer phone, customer sees worker phone.
+    if booking.status == "pending":
+        booking.customer_phone = None
+        booking.worker_phone = None
+    elif user_id == booking.worker_id:
+        booking.customer_phone = customer.phone_number if customer else None
+        booking.worker_phone = None
+    elif user_id == booking.customer_id:
+        booking.worker_phone = worker.phone_number if worker else None
+        booking.customer_phone = None
+    else:
+        booking.customer_phone = None
+        booking.worker_phone = None
     return booking
 
 

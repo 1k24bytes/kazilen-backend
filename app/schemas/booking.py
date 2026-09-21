@@ -18,6 +18,8 @@ class BookingResponse(BaseModel):
     worker_id: int
     worker_name: Optional[str] = None
     customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    worker_phone: Optional[str] = None
     service_id: str
     date: str
     time_slot: str
@@ -39,6 +41,8 @@ class BookingDetailResponse(BaseModel):
     worker_id: int
     worker_name: Optional[str] = None
     customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    worker_phone: Optional[str] = None
     service_id: str
     date: str
     time_slot: str
