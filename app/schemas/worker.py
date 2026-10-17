@@ -9,6 +9,7 @@ class WorkerResponseSchema(BaseModel):
     rating: Optional[float] = None
     reviews_count: Optional[int] = 0
     locality: str = "Dharampeth, Nagpur"
+    distance_km: Optional[float] = None
     eta: str = "Arrives in 30 mins"
     jobs_completed: str = "0"
 

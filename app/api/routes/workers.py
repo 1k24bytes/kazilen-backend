@@ -16,10 +16,12 @@ def get_available_workers(
     service_id: Optional[str] = None,
     sub_category: Optional[str] = None,
     hide_exhausted: bool = False,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
     db: Session = Depends(get_db)
 ):
-    """Retrieves list of available workers filtered optionally by service or sub-category ID."""
-    return WorkerService.get_available_workers(service_id=service_id, sub_category=sub_category, db=db, hide_exhausted=hide_exhausted)
+    """Retrieves list of available workers filtered optionally by service or sub-category ID. Pass customer `lat`/`lng` for nearest-first sorting."""
+    return WorkerService.get_available_workers(service_id=service_id, sub_category=sub_category, db=db, hide_exhausted=hide_exhausted, customer_lat=lat, customer_lng=lng)
 
 @router.get("/dashboard")
 @router.get("/worker/dashboard")

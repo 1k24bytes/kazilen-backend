@@ -1,9 +1,29 @@
 import json
+import math
 from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.db.models import MembershipPlan, User, BookingReview, Address
+
+
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Great-circle distance in km between two GPS points."""
+    r = 6371.0
+    d_lat = math.radians(lat2 - lat1)
+    d_lng = math.radians(lng2 - lng1)
+    a = (
+        math.sin(d_lat / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lng / 2) ** 2
+    )
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _to_float(value) -> float | None:
+    try:
+        return float(value) if value is not None and str(value).strip() != "" else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _time_left_label(expires_at) -> str:
@@ -41,6 +61,8 @@ class WorkerService:
         sub_category: Optional[str] = None,
         db: Session = None,
         hide_exhausted: bool = False,
+        customer_lat: Optional[float] = None,
+        customer_lng: Optional[float] = None,
     ) -> dict:
         target_service = service_id or sub_category
         workers = (
@@ -111,6 +133,15 @@ class WorkerService:
                 else:
                     locality_val = "Dharampeth, Nagpur"
 
+                # Distance from the customer (haversine over operational base
+                # GPS). Workers without coordinates sort last (None).
+                distance_km = None
+                if customer_lat is not None and customer_lng is not None and worker_addr:
+                    w_lat = _to_float(worker_addr.latitude)
+                    w_lng = _to_float(worker_addr.longitude)
+                    if w_lat is not None and w_lng is not None:
+                        distance_km = round(_haversine_km(customer_lat, customer_lng, w_lat, w_lng), 1)
+
                 filtered.append({
                     "id": w.id,
                     "full_name": w.full_name or "Verified Partner",
@@ -119,10 +150,14 @@ class WorkerService:
                     "rating": avg_rating,
                     "reviews_count": reviews_count,
                     "locality": locality_val,
+                    "distance_km": distance_km,
                     "eta": "Arrives in 30 mins",
                     "jobs_completed": f"{reviews_count}+" if reviews_count > 0 else "0",
                     "offered_services": parsed_services
                 })
+
+        # Nearest first; workers without GPS coordinates go last.
+        filtered.sort(key=lambda item: (item["distance_km"] is None, item["distance_km"] or 0))
 
         return {"status": "success", "workers": filtered}
 
