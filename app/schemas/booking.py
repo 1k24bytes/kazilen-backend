@@ -10,6 +10,7 @@ class BookingCreate(BaseModel):
     time_slot: str      # "HH:MM" (start of 1-hour slot)
     address: str
     amount: Optional[str] = None   # price string e.g. "299"
+    discount_code: Optional[str] = None  # promo code for all/specific customers
 
 
 class BookingResponse(BaseModel):
@@ -26,6 +27,8 @@ class BookingResponse(BaseModel):
     status: str
     address: Optional[str] = None
     amount: Optional[str] = None
+    discount_code: Optional[str] = None
+    discount_amount: Optional[str] = None
     start_otp: Optional[str] = None
     end_otp: Optional[str] = None
     created_at: Optional[Union[datetime, str]] = None
@@ -49,6 +52,8 @@ class BookingDetailResponse(BaseModel):
     status: str
     address: Optional[str] = None
     amount: Optional[str] = None
+    discount_code: Optional[str] = None
+    discount_amount: Optional[str] = None
     start_otp: Optional[str] = None   # only exposed to relevant party
     end_otp: Optional[str] = None     # only exposed to relevant party
     created_at: Optional[Union[datetime, str]] = None

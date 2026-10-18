@@ -150,6 +150,17 @@ class AuthService:
                 referred_user_id=new_user.id,
                 referral_code=referral_code,
             ))
+            # Rs rewards per admin config (both | referrer_only). Points logic untouched.
+            try:
+                from app.db.models import ReferralConfig
+                cfg = db.query(ReferralConfig).filter(ReferralConfig.id == 1).first()
+                if cfg and cfg.is_active:
+                    mode = (cfg.mode or "both").strip().lower()
+                    referrer.referral_earnings = (referrer.referral_earnings or 0) + int(cfg.referrer_reward_rs or 0)
+                    if mode == "both":
+                        new_user.referral_earnings = (new_user.referral_earnings or 0) + int(cfg.referred_reward_rs or 0)
+            except Exception:
+                pass
 
         db.commit()
         db.refresh(new_user)

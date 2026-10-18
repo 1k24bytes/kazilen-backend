@@ -65,7 +65,9 @@ class UserService:
             "location": location_data,
             "referral_code": user.referral_code,
             "referral_points": user.referral_points or 0,
+            "referral_earnings": user.referral_earnings or 0,
             "is_online": bool(user.is_online != 0 if user.is_online is not None else True),
+            "is_blocked": bool(getattr(user, "is_blocked", 0) or 0),
             "verification_status": user.verification_status or "approved",
             "profile_photo": user.profile_photo,
             "created_at": str(user.created_at) if user.created_at else None
@@ -99,8 +101,35 @@ class UserService:
 
     @staticmethod
     def update_worker_services(data: WorkerServicesUpdateSchema, current_user: User, db: Session) -> dict:
+        from fastapi import HTTPException
+        incoming = data.offered_services if isinstance(data.offered_services, list) else []
+        # Preserve admin-locked prices: worker cannot change price/price_type on locked items.
+        locked_by_id = {}
+        if current_user.offered_services:
+            try:
+                stored = json.loads(current_user.offered_services)
+                if isinstance(stored, list):
+                    for item in stored:
+                        if isinstance(item, dict) and item.get("id") and item.get("price_locked"):
+                            locked_by_id[str(item["id"])] = item
+            except Exception:
+                pass
+        merged = []
+        for item in incoming:
+            if isinstance(item, dict) and item.get("id"):
+                sid = str(item["id"])
+                if sid in locked_by_id:
+                    locked = locked_by_id[sid]
+                    item = dict(item)
+                    for key in ("price", "price_type", "fixed_price", "price_per_hour"):
+                        if key in locked:
+                            item[key] = locked[key]
+                    item["price_locked"] = True
+                merged.append(item)
+            else:
+                merged.append(item)
         if isinstance(data.offered_services, list):
-            current_user.offered_services = json.dumps(data.offered_services)
+            current_user.offered_services = json.dumps(merged if merged else data.offered_services)
         else:
             current_user.offered_services = str(data.offered_services)
 
@@ -110,7 +139,7 @@ class UserService:
         return {
             "status": "success",
             "message": "Offered services updated in database",
-            "offered_services": data.offered_services
+            "offered_services": merged if merged else data.offered_services
         }
 
     @staticmethod

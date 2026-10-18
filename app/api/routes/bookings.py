@@ -61,6 +61,19 @@ def get_worker_slots_endpoint(
 # Customer endpoints
 # ---------------------------------------------------------------------------
 
+@router.get("/validate-discount")
+def validate_discount_endpoint(
+    code: str = Query(...),
+    amount: int = Query(default=0),
+    current_user=Depends(get_current_user),
+):
+    """Validates a discount code for the logged-in customer without creating a booking."""
+    from app.db.database import get_db
+    from app.services.discount_service import DiscountService
+    db = next(get_db())
+    return {"status": "success", **DiscountService.validate(code, current_user.id, amount, db)}
+
+
 @router.post("/book", response_model=BookingResponse)
 def create_booking_endpoint(
     booking: BookingCreate,
