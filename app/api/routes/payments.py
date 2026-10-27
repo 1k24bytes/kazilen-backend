@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_admin, get_current_user
 from app.db.database import get_db
 from app.schemas.payment import SubscriptionVerifyRequest
+from app.schemas.platform_fee import BookingPaymentVerifyRequest
 from app.services.payment_service import PaymentService
 
 router = APIRouter()
@@ -77,3 +78,55 @@ def admin_payments(
 ):
     """Admin read-only view of online subscription payments (manual subs not listed)."""
     return PaymentService.list_payments(db, worker_id=worker_id, status_filter=status, limit=limit, offset=offset)
+
+
+@router.post("/booking/order")
+def create_booking_order(
+    booking_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Customer creates a Razorpay order for an online-mode booking."""
+    return PaymentService.create_booking_order(current_user.id, booking_id, db)
+
+
+@router.post("/booking/verify")
+def verify_booking_payment(
+    payload: BookingPaymentVerifyRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Client-side verify after checkout.js success (HMAC + fetch captured)."""
+    return PaymentService.verify_booking_payment(
+        current_user.id,
+        payload.razorpay_order_id,
+        payload.razorpay_payment_id,
+        payload.razorpay_signature,
+        db,
+    )
+
+
+@router.get("/booking/status/{order_id}")
+def booking_order_status(
+    order_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Poll booking order status (used when checkout modal is closed mid-flow)."""
+    return PaymentService.booking_order_status(current_user.id, order_id, db)
+
+
+@router.get("/admin/booking-payments")
+def admin_booking_payments(
+    customer_id: int | None = Query(default=None),
+    worker_id: int | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
+):
+    """Admin read-only view of customer online booking payments (cash bookings not listed)."""
+    return PaymentService.list_booking_payments(
+        db, customer_id=customer_id, worker_id=worker_id, status_filter=status, limit=limit, offset=offset
+    )

@@ -11,6 +11,7 @@ class BookingCreate(BaseModel):
     address: str
     amount: Optional[str] = None   # price string e.g. "299"
     discount_code: Optional[str] = None  # promo code for all/specific customers
+    payment_mode: Optional[str] = None  # cash (default) | online
 
 
 class BookingResponse(BaseModel):
@@ -29,6 +30,11 @@ class BookingResponse(BaseModel):
     amount: Optional[str] = None
     discount_code: Optional[str] = None
     discount_amount: Optional[str] = None
+    platform_fee: Optional[str] = None
+    total_amount: Optional[str] = None
+    payment_mode: Optional[str] = None
+    payment_status: Optional[str] = None
+    razorpay_order_id: Optional[str] = None
     start_otp: Optional[str] = None
     end_otp: Optional[str] = None
     created_at: Optional[Union[datetime, str]] = None
@@ -54,6 +60,11 @@ class BookingDetailResponse(BaseModel):
     amount: Optional[str] = None
     discount_code: Optional[str] = None
     discount_amount: Optional[str] = None
+    platform_fee: Optional[str] = None
+    total_amount: Optional[str] = None
+    payment_mode: Optional[str] = None
+    payment_status: Optional[str] = None
+    razorpay_order_id: Optional[str] = None
     start_otp: Optional[str] = None   # only exposed to relevant party
     end_otp: Optional[str] = None     # only exposed to relevant party
     created_at: Optional[Union[datetime, str]] = None
