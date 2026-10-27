@@ -7,7 +7,7 @@ import os
 import traceback
 import asyncio
 
-from app.api.routes import auth, users, workers, bookings, reviews, addresses, admin, catalog, membership, payments, platform_fees
+from app.api.routes import auth, users, workers, bookings, reviews, addresses, admin, catalog, membership, payments, platform_fees, offers, popups, support
 from app.db.database import engine, Base, SessionLocal
 from app.core.config import settings
 from app.services.referral_service import ensure_referral_codes
@@ -50,6 +50,10 @@ def auto_migrate():
         except Exception:
             pass
         try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN price_edit_allowed INTEGER DEFAULT 0"))
+        except Exception:
+            pass
+        try:
             conn.execute(text("CREATE UNIQUE INDEX ix_users_referral_code ON users (referral_code)"))
         except Exception:
             pass
@@ -66,10 +70,20 @@ def auto_migrate():
             ("payment_mode", "VARCHAR(20)"),
             ("payment_status", "VARCHAR(20)"),
             ("razorpay_order_id", "VARCHAR(100)"),
+            ("admin_confirmed", "INTEGER"),
             ("updated_at", timestamp_type),
         ]:
             try:
                 conn.execute(text(f"ALTER TABLE bookings ADD COLUMN {col_name} {col_type}"))
+            except Exception:
+                pass
+        # Referral config: discount % columns (feature/marketing #3)
+        for col_name, col_type in [
+            ("referred_discount_percent", "INTEGER"),
+            ("referrer_discount_percent", "INTEGER"),
+        ]:
+            try:
+                conn.execute(text(f"ALTER TABLE referral_config ADD COLUMN {col_name} {col_type}"))
             except Exception:
                 pass
 
@@ -127,6 +141,9 @@ app.include_router(catalog.router, prefix="/api", tags=["Catalog"])
 app.include_router(membership.router, prefix="/api/membership", tags=["Membership"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 app.include_router(platform_fees.router, prefix="/api/platform-fees", tags=["Platform Fees"])
+app.include_router(offers.router, prefix="/api/offers", tags=["Offers"])
+app.include_router(popups.router, prefix="/api/popups", tags=["Popups"])
+app.include_router(support.router, prefix="/api/support", tags=["Support"])
 app.include_router(users.router, prefix="/api/users", tags=["Users Profile"])
 app.include_router(workers.router, prefix="/api/workers", tags=["Worker Marketplace"])
 app.include_router(bookings.router, prefix="/api/bookings", tags=["Bookings"])

@@ -70,6 +70,7 @@ class UserService:
             "is_blocked": bool(getattr(user, "is_blocked", 0) or 0),
             "verification_status": user.verification_status or "approved",
             "profile_photo": user.profile_photo,
+            "price_edit_allowed": bool(getattr(user, "price_edit_allowed", 0) or 0),
             "created_at": str(user.created_at) if user.created_at else None
         }
 
@@ -103,6 +104,9 @@ class UserService:
     def update_worker_services(data: WorkerServicesUpdateSchema, current_user: User, db: Session) -> dict:
         from fastapi import HTTPException
         incoming = data.offered_services if isinstance(data.offered_services, list) else []
+        # Default-lock (feature/marketing #1): workers are locked unless admin grants
+        # price_edit_allowed. Even when allowed, per-service price_locked items stay preserved.
+        allowed = bool(getattr(current_user, "price_edit_allowed", 0) or 0)
         # Preserve admin-locked prices: worker cannot change price/price_type on locked items.
         locked_by_id = {}
         if current_user.offered_services:
@@ -125,9 +129,57 @@ class UserService:
                         if key in locked:
                             item[key] = locked[key]
                     item["price_locked"] = True
+                elif not allowed:
+                    # Not granted: preserve stored price if exists, else force lock with catalog default.
+                    if sid in locked_by_id:
+                        pass
+                    else:
+                        # Check stored unlocked price to preserve display, but lock it going forward.
+                        try:
+                            stored_list = json.loads(current_user.offered_services or "[]")
+                            prev = next((x for x in stored_list if isinstance(x, dict) and str(x.get("id")) == sid), None)
+                        except Exception:
+                            prev = None
+                        if prev:
+                            item = dict(item)
+                            for key in ("price", "price_type", "fixed_price", "price_per_hour"):
+                                if key in prev:
+                                    item[key] = prev[key]
+                        item = dict(item)
+                        item["price_locked"] = True
+                    # If worker tried to change price without permission, reject with clear message
+                    # when the price differs from stored (prevents silent overwrites).
+                    if not allowed and sid not in locked_by_id:
+                        # allow enable/disable + description, but block price edits
+                        pass
+                else:
+                    # Allowed but new service without explicit lock flag defaults to locked
+                    # until admin sets the price (admin-first pricing).
+                    if "price_locked" not in item:
+                        item = dict(item)
+                        item["price_locked"] = True
                 merged.append(item)
             else:
                 merged.append(item)
+        # Hard enforcement: if not allowed, any price change vs stored is rejected.
+        if not allowed and current_user.offered_services:
+            try:
+                stored = json.loads(current_user.offered_services)
+                stored_map = {str(x.get("id")): x for x in stored if isinstance(x, dict) and x.get("id")}
+                for item in merged:
+                    if isinstance(item, dict) and item.get("id"):
+                        sid = str(item["id"])
+                        prev = stored_map.get(sid)
+                        if prev:
+                            for key in ("price", "fixed_price", "price_per_hour"):
+                                if key in item and key in prev and item[key] != prev[key]:
+                                    raise HTTPException(status_code=403, detail="Price editing is locked by admin. Contact support for permission.")
+                            if "price_type" in item and "price_type" in prev and item["price_type"] != prev["price_type"]:
+                                raise HTTPException(status_code=403, detail="Price editing is locked by admin. Contact support for permission.")
+            except HTTPException:
+                raise
+            except Exception:
+                pass
         if isinstance(data.offered_services, list):
             current_user.offered_services = json.dumps(merged if merged else data.offered_services)
         else:

@@ -74,6 +74,15 @@ def validate_discount_endpoint(
     return {"status": "success", **DiscountService.validate(code, current_user.id, amount, db)}
 
 
+@router.get("/discounts/my")
+def my_discounts_endpoint(current_user=Depends(get_current_user)):
+    """Lists usable personal booking codes for the customer (referral REF… + scoped)."""
+    from app.db.database import get_db
+    from app.services.discount_service import DiscountService
+    db = next(get_db())
+    return DiscountService.list_for_user(current_user.id, db)
+
+
 @router.post("/book", response_model=BookingResponse)
 def create_booking_endpoint(
     booking: BookingCreate,

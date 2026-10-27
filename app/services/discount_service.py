@@ -73,3 +73,29 @@ class DiscountService:
             booking_id=booking_id,
             amount_off=amount_off,
         ))
+
+    @staticmethod
+    def list_for_user(user_id: int, db: Session) -> dict:
+        """Personal booking codes for a customer (referral REF… + account-scoped)."""
+        from datetime import datetime as _dt
+        today = _dt.now().strftime("%Y-%m-%d")
+        rows = db.query(Discount).filter(Discount.is_active == 1).order_by(Discount.id.desc()).limit(100).all()
+        out = []
+        for d in rows:
+            if (d.max_uses is not None) and (d.used_count or 0) >= d.max_uses:
+                continue
+            if d.valid_from and today < str(d.valid_from):
+                continue
+            if d.valid_to and today > str(d.valid_to):
+                continue
+            scope = (d.scope or "all").lower()
+            if scope == "users":
+                if user_id not in _parse_user_ids(d.user_ids):
+                    continue
+            out.append({
+                "code": d.code,
+                "discount_type": d.discount_type,
+                "value": d.value,
+                "min_amount": d.min_amount or 0,
+            })
+        return {"status": "success", "discounts": out}

@@ -46,4 +46,5 @@ class UserResponseSchema(BaseModel):
     is_online: bool = True
     verification_status: str = "approved"
     profile_photo: Optional[str] = None
+    price_edit_allowed: bool = False
     created_at: Optional[Union[datetime, str]] = None

@@ -150,15 +150,57 @@ class AuthService:
                 referred_user_id=new_user.id,
                 referral_code=referral_code,
             ))
-            # Rs rewards per admin config (both | referrer_only). Points logic untouched.
+            # Rs rewards per admin config (both | referrer_only | referred_only) + booking discount %.
+            # Points logic untouched. Discount creates a single-use personal code for the beneficiary.
             try:
                 from app.db.models import ReferralConfig
                 cfg = db.query(ReferralConfig).filter(ReferralConfig.id == 1).first()
                 if cfg and cfg.is_active:
                     mode = (cfg.mode or "both").strip().lower()
-                    referrer.referral_earnings = (referrer.referral_earnings or 0) + int(cfg.referrer_reward_rs or 0)
-                    if mode == "both":
+                    if mode not in ("both", "referrer_only", "referred_only"):
+                        mode = "both"
+                    if mode in ("both", "referrer_only"):
+                        referrer.referral_earnings = (referrer.referral_earnings or 0) + int(cfg.referrer_reward_rs or 0)
+                    if mode in ("both", "referred_only"):
                         new_user.referral_earnings = (new_user.referral_earnings or 0) + int(cfg.referred_reward_rs or 0)
+                    # Booking discounts: create personal single-use percent codes.
+                    from app.db.models import Discount as _Discount
+                    import time as _time
+
+                    def _grant_discount(user_id: int, pct: int, prefix: str):
+                        pct = max(0, min(100, int(pct or 0)))
+                        if pct <= 0:
+                            return
+                        base_code = f"{prefix}{referral_code}"
+                        code = base_code
+                        # Ensure unique code (suffix on collision).
+                        suffix = 0
+                        while db.query(_Discount).filter(_Discount.code == code).first():
+                            suffix += 1
+                            code = f"{base_code}{suffix}"
+                            if suffix > 9:
+                                code = f"{base_code}{int(_time.time()) % 10000}"
+                                break
+                        try:
+                            import json as _json
+                            db.add(_Discount(
+                                code=code,
+                                discount_type="percent",
+                                value=pct,
+                                scope="users",
+                                user_ids=_json.dumps([user_id]),
+                                min_amount=0,
+                                max_uses=1,
+                                used_count=0,
+                                is_active=1,
+                            ))
+                        except Exception:
+                            pass
+
+                    if mode in ("both", "referred_only"):
+                        _grant_discount(new_user.id, getattr(cfg, "referred_discount_percent", 0), "REF")
+                    if mode in ("both", "referrer_only"):
+                        _grant_discount(referrer.id, getattr(cfg, "referrer_discount_percent", 0), "THX")
             except Exception:
                 pass
 
