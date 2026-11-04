@@ -194,6 +194,14 @@ def create_booking(booking_data, customer_id: int) -> Booking:
     booking.total_amount = str(base_for_fee + fee_val)
     booking.payment_mode = payment_mode
     booking.payment_status = "awaiting_online" if payment_mode == "online" else "cash"
+    # Kazilen confirmation (feature/marketing #2): auto or manual per admin config.
+    try:
+        from app.db.models import BookingConfig as _BC
+        _cfg = db.query(_BC).filter(_BC.id == 1).first()
+        auto = True if not _cfg else bool(_cfg.auto_confirm)
+    except Exception:
+        auto = True
+    booking.admin_confirmed = 1 if auto else 0
     db.add(booking)
     db.commit()
     db.refresh(booking)
@@ -412,6 +420,8 @@ def accept_booking(booking_id: int, worker_id: int) -> dict:
         raise HTTPException(status_code=403, detail="This booking is not assigned to you")
     if booking.status != "pending":
         raise HTTPException(status_code=400, detail=f"Booking is already {booking.status}")
+    if not getattr(booking, "admin_confirmed", 1):
+        raise HTTPException(status_code=409, detail="Awaiting Kazilen confirmation. You can accept after admin confirms.")
     from app.services.membership_service import MembershipService
     quota = MembershipService.worker_quota(worker_id, db)
     if quota["subscribed"]:

@@ -35,6 +35,7 @@ class BookingResponse(BaseModel):
     payment_mode: Optional[str] = None
     payment_status: Optional[str] = None
     razorpay_order_id: Optional[str] = None
+    admin_confirmed: Optional[int] = None
     start_otp: Optional[str] = None
     end_otp: Optional[str] = None
     created_at: Optional[Union[datetime, str]] = None
@@ -65,6 +66,7 @@ class BookingDetailResponse(BaseModel):
     payment_mode: Optional[str] = None
     payment_status: Optional[str] = None
     razorpay_order_id: Optional[str] = None
+    admin_confirmed: Optional[int] = None
     start_otp: Optional[str] = None   # only exposed to relevant party
     end_otp: Optional[str] = None     # only exposed to relevant party
     created_at: Optional[Union[datetime, str]] = None

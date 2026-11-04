@@ -115,6 +115,7 @@ def admin_list_users(
                 "profile_photo": u.profile_photo,
                 "referral_code": u.referral_code,
                 "referral_points": u.referral_points,
+                "price_edit_allowed": bool(getattr(u, "price_edit_allowed", 0) or 0),
                 "created_at": str(u.created_at) if u.created_at else None,
             }
             for u in users
@@ -280,7 +281,7 @@ def admin_update_user(
     db: Session = Depends(get_db),
     admin: dict = Depends(get_current_admin),
 ):
-    """Update name, online status, block flag, or role for a user."""
+    """Update name, online status, block flag, price permission, or role for a user."""
     from fastapi import HTTPException
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -293,6 +294,8 @@ def admin_update_user(
         user.is_blocked = 1 if payload["is_blocked"] else 0
         if payload["is_blocked"]:
             user.is_online = 0
+    if "price_edit_allowed" in payload and payload["price_edit_allowed"] is not None:
+        user.price_edit_allowed = 1 if payload["price_edit_allowed"] else 0
     if "role" in payload and payload["role"] in ("customer", "worker"):
         user.role = payload["role"]
     if "verification_status" in payload and payload["verification_status"] in ("pending", "approved", "rejected"):
@@ -312,6 +315,7 @@ def admin_update_user(
             "profile_photo": user.profile_photo,
             "referral_code": user.referral_code,
             "referral_points": user.referral_points,
+            "price_edit_allowed": bool(getattr(user, "price_edit_allowed", 0) or 0),
         },
     }
 
@@ -534,7 +538,7 @@ def admin_list_referrals(
     claims = claims_query.offset(offset).limit(limit).all()
     user_ids = {c.referrer_id for c in claims} | {c.referred_user_id for c in claims}
     names = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
-    # Reward config (both | referrer_only + Rs amounts), auto-seeded on first read.
+    # Reward config (both | referrer_only | referred_only + Rs + discount %), auto-seeded on first read.
     from app.db.models import ReferralConfig
     config = db.query(ReferralConfig).filter(ReferralConfig.id == 1).first()
     if not config:
@@ -549,6 +553,8 @@ def admin_list_referrals(
             "mode": config.mode,
             "referrer_reward_rs": config.referrer_reward_rs,
             "referred_reward_rs": config.referred_reward_rs,
+            "referred_discount_percent": getattr(config, "referred_discount_percent", 0) or 0,
+            "referrer_discount_percent": getattr(config, "referrer_discount_percent", 0) or 0,
             "is_active": bool(config.is_active),
         },
         "leaders": [
@@ -584,7 +590,7 @@ def admin_update_referral_config(
     db: Session = Depends(get_db),
     admin: dict = Depends(get_current_admin),
 ):
-    """Set referral Rs rewards: mode both|referrer_only + amounts."""
+    """Set referral rewards: mode both|referrer_only|referred_only + Rs + discount %."""
     from fastapi import HTTPException
     from app.db.models import ReferralConfig
     config = db.query(ReferralConfig).filter(ReferralConfig.id == 1).first()
@@ -593,8 +599,8 @@ def admin_update_referral_config(
         db.add(config)
     if "mode" in payload and payload["mode"] is not None:
         mode = str(payload["mode"]).strip().lower()
-        if mode not in ("both", "referrer_only"):
-            raise HTTPException(status_code=400, detail="mode must be both or referrer_only")
+        if mode not in ("both", "referrer_only", "referred_only"):
+            raise HTTPException(status_code=400, detail="mode must be both, referrer_only or referred_only")
         config.mode = mode
     if "referrer_reward_rs" in payload and payload["referrer_reward_rs"] is not None:
         try:
@@ -606,6 +612,15 @@ def admin_update_referral_config(
             config.referred_reward_rs = max(0, int(payload["referred_reward_rs"]))
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="referred_reward_rs must be a number")
+    for key in ("referred_discount_percent", "referrer_discount_percent"):
+        if key in payload and payload[key] is not None:
+            try:
+                v = int(payload[key])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"{key} must be 0-100")
+            if v < 0 or v > 100:
+                raise HTTPException(status_code=400, detail=f"{key} must be 0-100")
+            setattr(config, key, v)
     if "is_active" in payload and payload["is_active"] is not None:
         config.is_active = 1 if payload["is_active"] else 0
     db.commit()
@@ -616,6 +631,8 @@ def admin_update_referral_config(
             "mode": config.mode,
             "referrer_reward_rs": config.referrer_reward_rs,
             "referred_reward_rs": config.referred_reward_rs,
+            "referred_discount_percent": getattr(config, "referred_discount_percent", 0) or 0,
+            "referrer_discount_percent": getattr(config, "referrer_discount_percent", 0) or 0,
             "is_active": bool(config.is_active),
         },
     }
@@ -820,11 +837,44 @@ def admin_list_bookings(
                 "time_slot": b.time_slot,
                 "status": b.status,
                 "amount": b.amount,
+                "payment_mode": getattr(b, "payment_mode", "cash"),
+                "payment_status": getattr(b, "payment_status", "cash"),
+                "admin_confirmed": bool(getattr(b, "admin_confirmed", 1)),
                 "created_at": str(b.created_at) if b.created_at else None,
             }
             for b in bookings
         ],
     }
+
+
+@router.get("/booking-config")
+def admin_get_booking_config(db: Session = Depends(get_db), admin: dict = Depends(get_current_admin)):
+    """Kazilen auto-confirm setting (feature/marketing #2)."""
+    from app.services.marketing_service import MarketingService
+    return MarketingService.get_booking_config(db)
+
+
+@router.put("/booking-config")
+def admin_set_booking_config(payload: dict, db: Session = Depends(get_db), admin: dict = Depends(get_current_admin)):
+    """Set auto_confirm true/false. When false, bookings need Kazilen confirm."""
+    from fastapi import HTTPException
+    from app.services.marketing_service import MarketingService
+    if "auto_confirm" not in payload:
+        raise HTTPException(status_code=400, detail="auto_confirm is required")
+    return MarketingService.set_booking_config(bool(payload["auto_confirm"]), db)
+
+
+@router.post("/bookings/{booking_id}/confirm")
+def admin_confirm_booking(booking_id: int, db: Session = Depends(get_db), admin: dict = Depends(get_current_admin)):
+    """Kazilen confirms a booking so the worker can accept."""
+    from fastapi import HTTPException
+    b = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    b.admin_confirmed = 1
+    db.commit()
+    db.refresh(b)
+    return {"status": "success", "booking_id": b.id, "admin_confirmed": True}
 
 
 @router.get("/reports/summary")
