@@ -21,7 +21,14 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import MembershipPlan, MembershipSubscription, SubscriptionPayment, User
+from app.db.models import (
+    Booking,
+    BookingPayment,
+    MembershipPlan,
+    MembershipSubscription,
+    SubscriptionPayment,
+    User,
+)
 from app.services.membership_service import MembershipService
 
 
@@ -65,6 +72,50 @@ def _payment_to_dict(p: SubscriptionPayment, db: Session) -> dict:
         "failure_reason": p.failure_reason,
         "created_at": created,
     }
+
+
+def _booking_payment_to_dict(p: BookingPayment, db: Session) -> dict:
+    customer = db.query(User).filter(User.id == p.customer_id).first()
+    worker = db.query(User).filter(User.id == p.worker_id).first()
+    created = p.created_at.isoformat() if getattr(p, "created_at", None) else None
+    return {
+        "id": p.id,
+        "booking_id": p.booking_id,
+        "customer_id": p.customer_id,
+        "customer_name": customer.full_name if customer else None,
+        "worker_id": p.worker_id,
+        "worker_name": worker.full_name if worker else None,
+        "base_amount": p.base_amount or 0,
+        "platform_fee": p.platform_fee or 0,
+        "total_amount": p.total_amount or 0,
+        "currency": p.currency or "INR",
+        "razorpay_order_id": p.razorpay_order_id,
+        "razorpay_payment_id": p.razorpay_payment_id,
+        "status": p.status,
+        "failure_reason": p.failure_reason,
+        "created_at": created,
+    }
+
+
+def _activate_booking_payment(db: Session, payment: BookingPayment) -> None:
+    """Mark booking as paid_online for a captured booking payment (idempotent)."""
+    if payment.status == "captured":
+        booking = db.query(Booking).filter(Booking.id == payment.booking_id).first()
+        if booking and getattr(booking, "payment_status", "") != "paid_online":
+            booking.payment_status = "paid_online"
+            db.commit()
+        return
+    booking = db.query(Booking).filter(Booking.id == payment.booking_id).first()
+    if booking and getattr(booking, "payment_status", "") == "paid_online":
+        return
+    payment.status = "captured"
+    db.commit()
+    db.refresh(payment)
+    if booking:
+        booking.payment_status = "paid_online"
+        booking.total_amount = str(payment.total_amount or booking.total_amount or booking.amount or "0")
+        booking.platform_fee = str(payment.platform_fee or booking.platform_fee or "0")
+        db.commit()
 
 
 def _activate_paid_subscription(db: Session, payment: SubscriptionPayment) -> dict:
@@ -321,24 +372,45 @@ class PaymentService:
             .filter(SubscriptionPayment.razorpay_order_id == order_id)
             .first()
         )
-        if not payment:
-            # Unknown order (e.g. non-subscription payment) — ack to stop retries.
-            return {"status": "success", "message": "Order not tracked; ignored"}
-        if payment.status == "captured":
-            return {"status": "success", "message": "Webhook already processed."}
-        # Another payment id already captured for this order — keep first winner.
-        if payment.razorpay_payment_id and payment.razorpay_payment_id != gateway_payment_id:
-            return {"status": "success", "message": "Order already paid with another payment; ignored"}
+        if payment:
+            if payment.status == "captured":
+                return {"status": "success", "message": "Webhook already processed."}
+            # Another payment id already captured for this order — keep first winner.
+            if payment.razorpay_payment_id and payment.razorpay_payment_id != gateway_payment_id:
+                return {"status": "success", "message": "Order already paid with another payment; ignored"}
 
-        payment.razorpay_payment_id = gateway_payment_id
-        payment.raw_payload = json.dumps(
+            payment.razorpay_payment_id = gateway_payment_id
+            payment.raw_payload = json.dumps(
+                {"method": entity.get("method"), "amount": entity.get("amount"), "event": event}
+            )[:4000]
+            payment.status = "webhook_received"
+            db.commit()
+            db.refresh(payment)
+            _activate_paid_subscription(db, payment)
+            return {"status": "success", "message": "Subscription activated via webhook."}
+
+        # Fall through to booking payments (customer online checkout).
+        bpay = (
+            db.query(BookingPayment)
+            .filter(BookingPayment.razorpay_order_id == order_id)
+            .first()
+        )
+        if not bpay:
+            # Unknown order — ack to stop retries.
+            return {"status": "success", "message": "Order not tracked; ignored"}
+        if bpay.status == "captured":
+            return {"status": "success", "message": "Webhook already processed."}
+        if bpay.razorpay_payment_id and bpay.razorpay_payment_id != gateway_payment_id:
+            return {"status": "success", "message": "Order already paid with another payment; ignored"}
+        bpay.razorpay_payment_id = gateway_payment_id
+        bpay.raw_payload = json.dumps(
             {"method": entity.get("method"), "amount": entity.get("amount"), "event": event}
         )[:4000]
-        payment.status = "webhook_received"
+        bpay.status = "webhook_received"
         db.commit()
-        db.refresh(payment)
-        _activate_paid_subscription(db, payment)
-        return {"status": "success", "message": "Subscription activated via webhook."}
+        db.refresh(bpay)
+        _activate_booking_payment(db, bpay)
+        return {"status": "success", "message": "Booking confirmed via webhook."}
 
     @staticmethod
     def list_payments(db: Session, worker_id: int | None = None, status_filter: str | None = None,
@@ -354,4 +426,217 @@ class PaymentService:
             "status": "success",
             "total": total,
             "payments": [_payment_to_dict(r, db) for r in rows],
+        }
+
+    # ------------------------------------------------------------------
+    # Customer booking online payments (feature/payment)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def create_booking_order(customer_id: int, booking_id: int, db: Session) -> dict:
+        from app.services.platform_fee_service import PlatformFeeService
+
+        booking = db.query(Booking).filter(Booking.id == booking_id).first()
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        if booking.customer_id != customer_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        if getattr(booking, "payment_mode", "cash") != "online":
+            raise HTTPException(status_code=400, detail="Booking is not an online payment booking")
+        if getattr(booking, "payment_status", "") == "paid_online":
+            raise HTTPException(status_code=400, detail="Booking already paid online")
+
+        try:
+            base = int(float(str(booking.amount or "0").strip() or 0))
+        except (TypeError, ValueError):
+            base = 0
+        quote = PlatformFeeService.quote(db, base)
+        fee = int(quote["platform_fee"] or 0)
+        total = base + fee
+
+        # Idempotency: reuse pending order for same booking if still created.
+        existing = (
+            db.query(BookingPayment)
+            .filter(BookingPayment.booking_id == booking.id)
+            .order_by(BookingPayment.id.desc())
+            .first()
+        )
+        if existing and existing.status == "created" and existing.total_amount == total:
+            return {
+                "status": "success",
+                "order_id": existing.razorpay_order_id,
+                "amount": total * 100,
+                "currency": "INR",
+                "key_id": settings.RAZORPAY_KEY_ID,
+                "booking_id": booking.id,
+                "base_amount": base,
+                "platform_fee": fee,
+                "total_amount": total,
+                "payment_id": existing.id,
+            }
+
+        client = _get_client()
+        payment = BookingPayment(
+            booking_id=booking.id,
+            customer_id=customer_id,
+            worker_id=booking.worker_id,
+            base_amount=base,
+            platform_fee=fee,
+            total_amount=total,
+            currency="INR",
+            razorpay_order_id="pending",
+            status="created",
+        )
+        db.add(payment)
+        db.commit()
+        db.refresh(payment)
+
+        try:
+            order = client.order.create(
+                {
+                    "amount": total * 100,
+                    "currency": "INR",
+                    "receipt": f"kazilen_booking_{payment.id}",
+                    "notes": {
+                        "booking_id": str(booking.id),
+                        "customer_id": str(customer_id),
+                        "worker_id": str(booking.worker_id),
+                        "payment_id": str(payment.id),
+                        "type": "booking_payment",
+                    },
+                    "payment_capture": 1,
+                }
+            )
+        except Exception as exc:
+            payment.status = "failed"
+            payment.failure_reason = f"order_create_failed:{str(exc)[:200]}"
+            db.commit()
+            raise HTTPException(status_code=502, detail="Failed to create payment order. Try again.")
+
+        payment.razorpay_order_id = order["id"]
+        booking.platform_fee = str(fee)
+        booking.total_amount = str(total)
+        booking.razorpay_order_id = order["id"]
+        booking.payment_status = "awaiting_online"
+        db.commit()
+        db.refresh(payment)
+        return {
+            "status": "success",
+            "order_id": order["id"],
+            "amount": total * 100,
+            "currency": "INR",
+            "key_id": settings.RAZORPAY_KEY_ID,
+            "booking_id": booking.id,
+            "base_amount": base,
+            "platform_fee": fee,
+            "total_amount": total,
+            "payment_id": payment.id,
+        }
+
+    @staticmethod
+    def verify_booking_payment(customer_id: int, order_id: str, razorpay_payment_id: str, signature: str, db: Session) -> dict:
+        _require_keys()
+        expected = hmac.new(
+            settings.RAZORPAY_KEY_SECRET.encode(),
+            f"{order_id}|{razorpay_payment_id}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            raise HTTPException(status_code=400, detail="Invalid payment signature")
+
+        payment = (
+            db.query(BookingPayment)
+            .filter(BookingPayment.razorpay_order_id == order_id)
+            .first()
+        )
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment order not found")
+        if payment.customer_id != customer_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        if payment.status == "captured" and payment.razorpay_payment_id == razorpay_payment_id:
+            booking = db.query(Booking).filter(Booking.id == payment.booking_id).first()
+            return {
+                "status": "success",
+                "message": "Payment already processed.",
+                "payment": _booking_payment_to_dict(payment, db),
+                "booking_id": payment.booking_id,
+                "payment_status": getattr(booking, "payment_status", "paid_online"),
+            }
+        dup = (
+            db.query(BookingPayment)
+            .filter(BookingPayment.razorpay_payment_id == razorpay_payment_id)
+            .first()
+        )
+        if dup and dup.id != payment.id and dup.status == "captured":
+            raise HTTPException(status_code=409, detail="Payment already used for another order")
+
+        client = _get_client()
+        try:
+            fetched = client.payment.fetch(razorpay_payment_id)
+        except Exception:
+            payment.status = "failed"
+            payment.failure_reason = "fetch_failed"
+            db.commit()
+            raise HTTPException(status_code=502, detail="Could not confirm payment with gateway.")
+        if fetched.get("status") != "captured":
+            payment.status = "failed"
+            payment.failure_reason = f"payment_not_captured:{fetched.get('status')}"
+            payment.raw_payload = json.dumps({"status": fetched.get("status")})[:4000]
+            db.commit()
+            raise HTTPException(status_code=400, detail="Payment not captured")
+        paid_amount = fetched.get("amount")
+        if paid_amount is not None and int(paid_amount) != int(payment.total_amount or 0) * 100:
+            payment.status = "failed"
+            payment.failure_reason = f"amount_mismatch:expected={int(payment.total_amount or 0) * 100},got={paid_amount}"
+            db.commit()
+            raise HTTPException(status_code=400, detail="Paid amount does not match booking total")
+
+        payment.razorpay_payment_id = razorpay_payment_id
+        payment.razorpay_signature = signature
+        payment.raw_payload = json.dumps(
+            {"method": fetched.get("method"), "status": fetched.get("status")}
+        )[:4000]
+        db.commit()
+        db.refresh(payment)
+        _activate_booking_payment(db, payment)
+        db.refresh(payment)
+        return {
+            "status": "success",
+            "message": "Payment verified. Booking confirmed online.",
+            "payment": _booking_payment_to_dict(payment, db),
+            "booking_id": payment.booking_id,
+            "payment_status": "paid_online",
+        }
+
+    @staticmethod
+    def booking_order_status(customer_id: int, order_id: str, db: Session) -> dict:
+        payment = (
+            db.query(BookingPayment)
+            .filter(
+                BookingPayment.razorpay_order_id == order_id,
+                BookingPayment.customer_id == customer_id,
+            )
+            .first()
+        )
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment order not found")
+        return {"status": "success", "payment": _booking_payment_to_dict(payment, db)}
+
+    @staticmethod
+    def list_booking_payments(db: Session, customer_id: int | None = None, worker_id: int | None = None,
+                              status_filter: str | None = None, limit: int = 50, offset: int = 0) -> dict:
+        query = db.query(BookingPayment).order_by(BookingPayment.id.desc())
+        if customer_id:
+            query = query.filter(BookingPayment.customer_id == customer_id)
+        if worker_id:
+            query = query.filter(BookingPayment.worker_id == worker_id)
+        if status_filter:
+            query = query.filter(BookingPayment.status == status_filter)
+        total = query.count()
+        rows = query.offset(offset).limit(limit).all()
+        return {
+            "status": "success",
+            "total": total,
+            "payments": [_booking_payment_to_dict(r, db) for r in rows],
         }

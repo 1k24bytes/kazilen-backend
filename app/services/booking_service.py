@@ -145,6 +145,10 @@ def create_booking(booking_data, customer_id: int) -> Booking:
                     detail="This worker is already booked during that time. Please choose a different slot.",
                 )
 
+    payment_mode = str(getattr(booking_data, "payment_mode", None) or "cash").strip().lower()
+    if payment_mode not in ("cash", "online"):
+        raise HTTPException(status_code=400, detail="payment_mode must be cash or online")
+
     booking = Booking(
         customer_id=customer_id,
         worker_id=booking_data.worker_id,
@@ -174,6 +178,22 @@ def create_booking(booking_data, customer_id: int) -> Booking:
         from app.db.models import Discount as _Discount
         row = db.query(_Discount).filter(_Discount.code == discount_code).first()
         discount_id = row.id if row else None
+    # Platform fee (server-side, never trust client). Applies to both cash + online
+    # so the breakup stays consistent; online mode charges total via Razorpay.
+    try:
+        base_for_fee = int(float(str(booking.amount or "0").strip() or 0))
+    except (TypeError, ValueError):
+        base_for_fee = 0
+    try:
+        from app.services.platform_fee_service import PlatformFeeService as _PFS
+        quote = _PFS.quote(db, base_for_fee)
+        fee_val = int(quote["platform_fee"] or 0)
+    except Exception:
+        fee_val = 0
+    booking.platform_fee = str(fee_val)
+    booking.total_amount = str(base_for_fee + fee_val)
+    booking.payment_mode = payment_mode
+    booking.payment_status = "awaiting_online" if payment_mode == "online" else "cash"
     db.add(booking)
     db.commit()
     db.refresh(booking)
