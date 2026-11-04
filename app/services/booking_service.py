@@ -155,9 +155,36 @@ def create_booking(booking_data, customer_id: int) -> Booking:
         amount=booking_data.amount,
         status="pending",
     )
+    # Optional discount code (all customers or specific customers).
+    discount_code = (getattr(booking_data, "discount_code", None) or "").strip().upper() or None
+    discount_off = 0
+    discount_id = None
+    if discount_code:
+        from app.services.discount_service import DiscountService
+        try:
+            base_amt = int(str(booking_data.amount or "0").strip() or 0)
+        except (TypeError, ValueError):
+            base_amt = 0
+        result = DiscountService.validate(discount_code, customer_id, base_amt, db)
+        discount_off = int(result["amount_off"] or 0)
+        final_amt = int(result["final_amount"] or 0)
+        booking.amount = str(final_amt)
+        booking.discount_code = discount_code
+        booking.discount_amount = str(discount_off)
+        from app.db.models import Discount as _Discount
+        row = db.query(_Discount).filter(_Discount.code == discount_code).first()
+        discount_id = row.id if row else None
     db.add(booking)
     db.commit()
     db.refresh(booking)
+    if discount_id:
+        try:
+            from app.services.discount_service import DiscountService as _DS
+            _DS.apply_to_booking(discount_id, customer_id, booking.id, discount_off, db)
+            db.commit()
+            db.refresh(booking)
+        except Exception:
+            pass
     print(f"[BOOKING] New booking #{booking.id} created for customer {customer_id}, worker {booking_data.worker_id}")
     booking.worker_name = worker.full_name or "Verified Partner"
     customer = db.query(User).filter(User.id == customer_id).first()

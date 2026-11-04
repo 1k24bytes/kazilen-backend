@@ -72,6 +72,8 @@ class WorkerService:
                 User.is_online != 0,
                 # Only admin-approved workers are visible in the marketplace.
                 User.verification_status == "approved",
+                # Permanently blocked workers stay hidden even if approved/online.
+                User.is_blocked == 0,
             )
             .all()
             if db else []

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin
@@ -82,3 +82,65 @@ def admin_update_sub_category(sub_id: str, payload: SubCategoryUpdate, db: Sessi
 @router.delete("/admin/sub-categories/{sub_id}")
 def admin_delete_sub_category(sub_id: str, db: Session = Depends(get_db), admin: dict = Depends(get_current_admin)):
     return CatalogService.delete_sub_category(db, sub_id)
+
+
+@router.post("/admin/catalog/upload")
+def admin_upload_catalog_image(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
+):
+    """Accepts JPEG/PNG/WebP from PC, converts to WebP, stores via R2 (or local /static fallback)."""
+    import io
+    import os
+    import uuid
+    from fastapi import HTTPException, status
+
+    ALLOWED = {"image/jpeg", "image/png", "image/webp"}
+    if not file or not file.content_type or file.content_type not in ALLOWED:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only JPEG, PNG or WebP images are allowed.")
+    contents = file.file.read()
+    if not contents or len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Image must be non-empty and under 5 MB.")
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(contents))
+        if img.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            try:
+                bg.paste(img, mask=img.split()[-1])
+                img = bg
+            except Exception:
+                img = img.convert("RGB")
+        else:
+            img = img.convert("RGB")
+        out = io.BytesIO()
+        img.save(out, format="WEBP", quality=82, method=6)
+        webp_bytes = out.getvalue()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid image file: {e}")
+
+    # Prefer R2 when configured (same pattern as worker photos).
+    try:
+        from app.services.r2_service import R2Service
+        from app.core.config import settings as _settings
+        if _settings.R2_PUBLIC_BUCKET_NAME and _settings.R2_PUBLIC_URL:
+            result = R2Service.upload_public_photo(webp_bytes, "upload.webp", "image/webp", folder="catalog")
+            return {"status": "success", "url": result["url"], "publicId": result["key"]}
+    except HTTPException:
+        pass
+    except Exception:
+        pass
+
+    # Local fallback: backend/static/catalog/<uuid>.webp served at /static/...
+    try:
+        base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "static", "catalog")
+        os.makedirs(base_dir, exist_ok=True)
+        fname = f"{uuid.uuid4()}.webp"
+        with open(os.path.join(base_dir, fname), "wb") as fh:
+            fh.write(webp_bytes)
+        return {"status": "success", "url": f"/static/catalog/{fname}", "publicId": f"static/catalog/{fname}"}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Upload failed: {e}")

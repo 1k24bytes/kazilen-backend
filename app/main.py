@@ -1,7 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+import os
 import traceback
 import asyncio
 
@@ -44,6 +46,10 @@ def auto_migrate():
         except Exception:
             pass
         try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_blocked INTEGER DEFAULT 0"))
+        except Exception:
+            pass
+        try:
             conn.execute(text("CREATE UNIQUE INDEX ix_users_referral_code ON users (referral_code)"))
         except Exception:
             pass
@@ -53,6 +59,8 @@ def auto_migrate():
             ("start_otp", "VARCHAR(6)"),
             ("end_otp", "VARCHAR(6)"),
             ("amount", "VARCHAR(20)"),
+            ("discount_code", "VARCHAR(50)"),
+            ("discount_amount", "VARCHAR(20)"),
             ("updated_at", timestamp_type),
         ]:
             try:
@@ -91,6 +99,12 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+# Local fallback for catalog uploads (PC → WebP) when R2 is not configured.
+# Files land in backend/static/catalog/<uuid>.webp and are served at /static/...
+STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+os.makedirs(os.path.join(STATIC_DIR, "catalog"), exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
